@@ -1,0 +1,795 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <filesystem>
+#include <cmath>
+#include <algorithm>
+#include <numeric>
+
+
+using namespace std;
+namespace fs = std::filesystem;
+
+
+
+std::vector<std::vector<double>> marziliano_method_h(const std::vector<std::vector<int>>& edges, const std::vector<std::vector<double>>& image) {
+    std::vector<std::vector<double>> edge_widths(image.size(), std::vector<double>(image[0].size(), 0.0));
+    std::vector<std::vector<double>> gradient_y(image.size(), std::vector<double>(image[0].size(), 0.0));
+    std::vector<std::vector<double>> gradient_x(image.size(), std::vector<double>(image[0].size(), 0.0));
+    std::vector<std::vector<double>> edge_angles(image.size(), std::vector<double>(image[0].size(), 0.0));
+    double edge_ignore = 0.1;
+    double finetune_number = 0.0;
+
+    // Calculate gradient in x and y directions
+    for (int row = 0; row < image.size(); row++) {
+        for (int col = 0; col < image[0].size(); col++) {
+            if (col > 0 && col < image[0].size() - 1) {
+                gradient_x[row][col] = image[row][col + 1] - image[row][col - 1];
+            }
+            if (row > 0 && row < image.size() - 1) {
+                gradient_y[row][col] = image[row + 1][col] - image[row - 1][col];
+            }
+        }
+    }
+
+    int img_height = image.size();
+    int img_width = image[0].size();
+
+    // Calculate edge angles
+    for (int row = 0; row < img_height; row++) {
+        for (int col = 0; col < img_width; col++) {
+            if (gradient_x[row][col] != 0) {
+                edge_angles[row][col] = std::atan2(gradient_y[row][col], gradient_x[row][col]) * (180 / M_PI);
+            } else if (gradient_x[row][col] == 0 && gradient_y[row][col] == 0) {
+                edge_angles[row][col] = 0;
+            } else if (gradient_x[row][col] == 0 && gradient_y[row][col] == M_PI / 2) {
+                edge_angles[row][col] = 90;
+            }
+        }
+    }
+
+    // Quantize edge angles
+    std::vector<std::vector<double>> quantized_angles(image.size(), std::vector<double>(image[0].size(), 0.0));
+    for (int row = 0; row < img_height; row++) {
+        for (int col = 0; col < img_width; col++) {
+            quantized_angles[row][col] = 180 * std::round((edge_angles[row][col] / 180));
+        }
+    }
+
+    // Calculate edge widths
+    for (int row = 1; row < img_height - 1; row++) {
+        for (int col = edge_ignore * img_width; col < (1 - edge_ignore) * (img_width - 1); col++) {
+            if (edges[row][col] == 1) {
+                if (quantized_angles[row][col] == 180 || quantized_angles[row][col] == -180) {
+                    int margin = 0;
+                    while (margin <= 100) {
+                        int inner_border = col - 1 - margin;
+                        int outer_border = col - 2 - margin;
+
+                        if (outer_border < 0 || (image[row][outer_border] - image[row][inner_border]) <= -1) {
+                            outer_border += 1;
+                            int finetune = 0;
+                            while (finetune <= margin) {
+                                inner_border += 1;
+                                if ((image[row][outer_border] - image[row][inner_border]) > finetune_number) {
+                                    break;
+                                }
+                                finetune++;
+                            }
+                            margin = margin - finetune;
+                            break;
+                        }
+                        margin++;
+                    }
+
+                    int width_left = margin + 1;
+
+                    int margin = 0;
+                    while (margin <= 100) {
+                        int inner_border = col + 1 + margin;
+                        int outer_border = col + 2 + margin;
+
+                        if (outer_border >= img_width || (image[row][outer_border] - image[row][inner_border]) >= 1) {
+                            outer_border -= 1;
+                            int finetune = 0;
+                            while (finetune <= margin) {
+                                inner_border -= 1;
+                                if ((image[row][inner_border] - image[row][outer_border]) > finetune_number) {
+                                    break;
+                                }
+                                finetune++;
+                            }
+                            margin = margin - finetune;
+                            break;
+                        }
+                        margin++;
+                    }
+
+                    int width_right = margin + 1;
+
+                    edge_widths[row][col] = width_left + width_right;
+                }
+
+                // Gradient angle = 0
+                if (quantized_angles[row][col] == 0) {
+                    int margin = 0;
+                    while (margin <= 100) {
+                        int inner_border = col - 1 - margin;
+                        int outer_border = col - 2 - margin;
+
+                        if (outer_border < 0 || (image[row][outer_border] - image[row][inner_border]) >= 1) {
+                            outer_border += 1;
+                            int finetune = 0;
+                            while (finetune <= margin) {
+                                inner_border += 1;
+                                if ((image[row][inner_border] - image[row][outer_border]) > finetune_number) {
+                                    break;
+                                }
+                                finetune++;
+                            }
+                            margin = margin - finetune;
+                            break;
+                        }
+                        margin++;
+                    }
+
+                    int width_left = margin + 1;
+
+                    int margin = 0;
+                    while (margin <= 100) {
+                        int inner_border = col + 1 + margin;
+                        int outer_border = col + 2 + margin;
+
+                        if (outer_border >= img_width || (image[row][outer_border] - image[row][inner_border]) <= -1) {
+                            outer_border -= 1;
+                            int finetune = 0;
+                            while (finetune <= margin) {
+                                inner_border -= 1;
+                                if ((image[row][outer_border] - image[row][inner_border]) > finetune_number) {
+                                    break;
+                                }
+                                finetune++;
+                            }
+                            margin = margin - finetune;
+                            break;
+                        }
+                        margin++;
+                    }
+
+                    int width_right = margin + 1;
+
+                    edge_widths[row][col] = width_right + width_left;
+                }
+            }
+        }
+    }
+
+    return edge_widths;
+}
+
+std::vector<std::vector<double>> marziliano_method_v(const std::vector<std::vector<int>>& edges, const std::vector<std::vector<double>>& image) {
+    std::vector<std::vector<double>> edge_widths(image.size(), std::vector<double>(image[0].size(), 0.0));
+
+    std::vector<std::vector<double>> gradient_y(image.size(), std::vector<double>(image[0].size(), 0.0));
+    std::vector<std::vector<double>> gradient_x(image.size(), std::vector<double>(image[0].size(), 0.0));
+
+    int img_height = image.size();
+    int img_width = image[0].size();
+
+    std::vector<std::vector<double>> edge_angles(image.size(), std::vector<double>(image[0].size(), 0.0));
+
+    double edge_ignore = 0.1;
+
+    double finetune_number = 0.0;
+
+    // calculate the angle of the edges
+    for (int row = 0; row < img_height; row++) {
+        for (int col = 0; col < img_width; col++) {
+            if (gradient_x[row][col] != 0) {
+                edge_angles[row][col] = std::atan2(gradient_y[row][col], gradient_x[row][col]) * (180 / M_PI);
+            }
+            else if (gradient_x[row][col] == 0 && gradient_y[row][col] == 0) {
+                edge_angles[row][col] = 0;
+            }
+            else if (gradient_x[row][col] == 0 && gradient_y[row][col] == M_PI / 2) {
+                edge_angles[row][col] = 90;
+            }
+        }
+    }
+
+    if (std::any_of(edge_angles.begin(), edge_angles.end(), [](const std::vector<double>& row) {
+        return std::any_of(row.begin(), row.end(), [](double angle) {
+            return angle != 0.0;
+        });
+    })) {
+        std::vector<std::vector<double>> quantized_angles(image.size(), std::vector<double>(image[0].size(), 0.0));
+
+        for (int row = edge_ignore * img_height; row < (1 - edge_ignore) * (img_height - 1); row++) {
+            for (int col = 1; col < img_width - 1; col++) {
+                if (edges[row][col] == 1) {
+
+                    // gradient angle = -90
+                    if (quantized_angles[row][col] == -90) {
+                        for (int margin = 0; margin <= 100; margin++) {
+                            int inner_border = (row - 1) - margin;
+                            int outer_border = (row - 2) - margin;
+
+                            // outside image or intensity decreasing from up to down
+                            if (outer_border < 0 || (image[outer_border][col] - image[inner_border][col]) <= -1) {
+                                outer_border += 1;
+                                for (int finetune = 0; finetune <= margin; finetune++) {
+                                    inner_border += 1;
+                                    if ((image[outer_border][col] - image[inner_border][col]) > finetune_number) {
+                                        break;
+                                    }
+                                }
+                                margin = margin - finetune;
+                                break;
+                            }
+                        }
+
+                        int width_up = margin + 1;
+
+                        for (int margin = 0; margin <= 100; margin++) {
+                            int inner_border = (row + 1) + margin;
+                            int outer_border = (row + 2) + margin;
+
+                            // outside image or intensity decreasing from up to down
+                            if (outer_border >= img_height || (image[outer_border][col] - image[inner_border][col]) >= 1) {
+                                outer_border -= 1;
+                                for (int finetune = 0; finetune <= margin; finetune++) {
+                                    inner_border -= 1;
+                                    if ((image[inner_border][col] - image[outer_border][col]) > finetune_number) {
+                                        break;
+                                    }
+                                }
+                                margin = margin - finetune;
+                                break;
+                            }
+                        }
+
+                        int width_down = margin + 1;
+
+                        edge_widths[row][col] = width_up + width_down;
+                    }
+
+                    // gradient angle = 90
+                    if (quantized_angles[row][col] == 90) {
+                        for (int margin = 0; margin <= 100; margin++) {
+                            int inner_border = (row - 1) - margin;
+                            int outer_border = (row - 2) - margin;
+
+                            // outside image or intensity increasing from up to down
+                            if (outer_border < 0 || (image[outer_border][col] - image[inner_border][col]) >= 1) {
+                                outer_border += 1;
+                                for (int finetune = 0; finetune <= margin; finetune++) {
+                                    inner_border += 1;
+                                    if ((image[inner_border][col] - image[outer_border][col]) > finetune_number) {
+                                        break;
+                                    }
+                                }
+                                margin = margin - finetune;
+                                break;
+                            }
+                        }
+
+                        int width_up = margin + 1;
+
+                        for (int margin = 0; margin <= 100; margin++) {
+                            int inner_border = (row + 1) + margin;
+                            int outer_border = (row + 2) + margin;
+
+                            // outside image or intensity decreasing from up to down
+                            if (outer_border >= img_height || (image[outer_border][col] - image[inner_border][col]) <= -1) {
+                                outer_border -= 1;
+                                for (int finetune = 0; finetune <= margin; finetune++) {
+                                    inner_border -= 1;
+                                    if ((image[outer_border][col] - image[inner_border][col]) > finetune_number) {
+                                        break;
+                                    }
+                                }
+                                margin = margin - finetune;
+                                break;
+                            }
+                        }
+
+                        int width_down = margin + 1;
+
+                        edge_widths[row][col] = width_up + width_down;
+                    }
+                }
+            }
+        }
+    }
+
+    return edge_widths;
+}
+
+
+
+
+std::vector<std::vector<double>> HSOBEL_WEIGHTS = {{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}};
+std::vector<std::vector<double>> VSOBEL_WEIGHTS = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
+
+std::vector<std::vector<double>> convolve(const std::vector<std::vector<double>>& image, const std::vector<std::vector<double>>& kernel) {
+    int image_rows = image.size();
+    int image_cols = image[0].size();
+    int kernel_size = kernel.size();
+    int kernel_radius = kernel_size / 2;
+
+    std::vector<std::vector<double>> result(image_rows, std::vector<double>(image_cols, 0));
+
+    for (int i = kernel_radius; i < image_rows - kernel_radius; i++) {
+        for (int j = kernel_radius; j < image_cols - kernel_radius; j++) {
+            double sum = 0;
+            for (int k = 0; k < kernel_size; k++) {
+                for (int l = 0; l < kernel_size; l++) {
+                    sum += image[i + k - kernel_radius][j + l - kernel_radius] * kernel[k][l];
+                }
+            }
+            result[i][j] = sum;
+        }
+    }
+
+    return result;
+}
+
+std::vector<std::vector<double>> sobel_h(const std::vector<std::vector<double>>& image) {
+    std::vector<std::vector<double>> h1 = HSOBEL_WEIGHTS;
+    double sum_h1 = 0;
+    for (const auto& row : h1) {
+        for (double value : row) {
+            sum_h1 += std::abs(value);
+        }
+    }
+    for (auto& row : h1) {
+        for (double& value : row) {
+            value /= sum_h1;
+        }
+    }
+
+    std::vector<std::vector<double>> strength2 = convolve(image, h1);
+    std::vector<double> strength1;
+    for (const auto& row : strength2) {
+        strength1.insert(strength1.end(), row.begin(), row.end());
+    }
+    std::sort(strength1.begin(), strength1.end());
+    int index = static_cast<int>(strength1.size() * 0.99);
+    double thresh2 = strength1[index];
+
+    for (auto& row : strength2) {
+        for (double& value : row) {
+            if (value <= thresh2) {
+                value = 0;
+            }
+        }
+    }
+
+    return _simple_thinning(strength2);
+}
+
+std::vector<std::vector<double>> sobel_v(const std::vector<std::vector<double>>& image) {
+    std::vector<std::vector<double>> h1 = VSOBEL_WEIGHTS;
+    double sum_h1 = 0;
+    for (const auto& row : h1) {
+        for (double value : row) {
+            sum_h1 += std::abs(value);
+        }
+    }
+    for (auto& row : h1) {
+        for (double& value : row) {
+            value /= sum_h1;
+        }
+    }
+
+    std::vector<std::vector<double>> strength2 = convolve(image, h1);
+    std::vector<double> strength1;
+    for (const auto& row : strength2) {
+        strength1.insert(strength1.end(), row.begin(), row.end());
+    }
+    std::sort(strength1.begin(), strength1.end());
+    int index = static_cast<int>(strength1.size() * 0.99);
+    double thresh2 = strength1[index];
+
+    for (auto& row : strength2) {
+        for (double& value : row) {
+            if (value <= thresh2) {
+                value = 0;
+            }
+        }
+    }
+
+    return _simple_thinning(strength2);
+}
+
+std::vector<std::vector<double>> _simple_thinning(const std::vector<std::vector<double>>& strength) {
+    int num_rows = strength.size();
+    int num_cols = strength[0].size();
+
+    std::vector<double> zero_column(num_rows, 0);
+    std::vector<double> zero_row(num_cols, 0);
+
+    std::vector<std::vector<bool>> x(num_rows, std::vector<bool>(num_cols, false));
+    std::vector<std::vector<bool>> y(num_rows, std::vector<bool>(num_cols, false));
+
+    for (int i = 0; i < num_rows; i++) {
+        for (int j = 1; j < num_cols; j++) {
+            x[i][j] = (strength[i][j] > zero_column[j - 1]) && (strength[i][j] > strength[i][j + 1]);
+        }
+    }
+
+    for (int i = 1; i < num_rows; i++) {
+        for (int j = 0; j < num_cols; j++) {
+            y[i][j] = (strength[i][j] > zero_row[i - 1]) && (strength[i][j] > strength[i + 1][j]);
+        }
+    }
+
+    std::vector<std::vector<double>> result(num_rows, std::vector<double>(num_cols, 0));
+    for (int i = 0; i < num_rows; i++) {
+        for (int j = 0; j < num_cols; j++) {
+            result[i][j] = x[i][j] || y[i][j];
+        }
+    }
+
+    return result;
+}
+
+std::vector<int> FPS(const std::vector<std::vector<double>>& sample, int num) {
+    int n = sample.size();
+    int num_cols = sample[0].size();
+
+    std::vector<double> center(num_cols, 0);
+    for (const auto& row : sample) {
+        for (int i = 0; i < num_cols; i++) {
+            center[i] += row[i];
+        }
+    }
+    for (double& value : center) {
+        value /= n;
+    }
+
+    std::vector<int> selected;
+    std::vector<double> min_distance(n, 0);
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < num_cols; j++) {
+            min_distance[i] += std::pow(sample[i][j] - center[j], 2);
+        }
+        min_distance[i] = std::sqrt(min_distance[i]);
+    }
+
+    int p0 = std::distance(min_distance.begin(), std::max_element(min_distance.begin(), min_distance.end()));
+    selected.push_back(p0);
+
+    min_distance.assign(n, 0);
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < num_cols; j++) {
+            min_distance[i] += std::pow(sample[p0][j] - sample[i][j], 2);
+        }
+        min_distance[i] = std::sqrt(min_distance[i]);
+    }
+    selected.push_back(std::distance(min_distance.begin(), std::max_element(min_distance.begin(), min_distance.end())));
+
+    for (int i = 2; i < num; i++) {
+        for (int p = 0; p < n; p++) {
+            double d = 0;
+            for (int j = 0; j < num_cols; j++) {
+                d += std::pow(sample[selected.back()][j] - sample[p][j], 2);
+            }
+            d = std::sqrt(d);
+            if (d <= min_distance[p]) {
+                min_distance[p] = d;
+            }
+        }
+        selected.push_back(std::distance(min_distance.begin(), std::max_element(min_distance.begin(), min_distance.end())));
+    }
+
+    return selected;
+}
+
+
+
+// *************************************低通滤波*********************************
+
+
+// Function to apply Butterworth filter
+std::vector<double> butterworthFilter(std::vector<double> input, int order, double cutoff)
+{
+    std::vector<double> output(input.size());
+    double a[order + 1] = {0};
+    double b[order + 1] = {0};
+
+    // Calculate filter coefficients
+    double wc = 2 * M_PI * cutoff;
+    double alpha = sin(wc) / (2 * order);
+    double beta = cos(wc);
+
+    b[0] = pow(1 + alpha, order);
+    a[0] = 1;
+
+    for (int i = 1; i <= order; i++)
+    {
+        b[i] = (1 - beta) * pow(1 + alpha, order - i);
+        a[i] = -beta * a[i - 1];
+    }
+
+    // Apply filter to input signal
+    for (int i = 0; i < input.size(); i++)
+    {
+        output[i] = b[0] * input[i];
+        for (int j = 1; j <= order; j++)
+        {
+            output[i] += b[j] * input[i - j] - a[j] * output[i - j];
+        }
+    }
+
+    return output;
+}
+
+// int main()
+// {
+//     int height = 10; // Replace with actual height value
+//     int width = 10; // Replace with actual width value
+
+//     // Initialize img_hfilted and img_vfilted arrays
+//     std::vector<std::vector<int>> img_hfilted(height, std::vector<int>(width));
+//     std::vector<std::vector<int>> img_vfilted(height, std::vector<int>(width));
+
+//     // Apply Butterworth filter to img_hfilted array
+//     std::vector<double> b = butterworthFilter(img_hfilted[0], 8, 0.1);
+//     for (int i = 0; i < height; i++)
+//     {
+//         std::vector<double> filtered = butterworthFilter(img_hfilted[i], 8, 0.1);
+//         for (int j = 0; j < width; j++)
+//         {
+//             img_hfilted[i][j] = static_cast<int>(filtered[j]);
+//         }
+//     }
+
+//     // Apply Butterworth filter to img_vfilted array
+//     for (int i = 0; i < width; i++)
+//     {
+//         std::vector<double> filtered = butterworthFilter(img_vfilted[i], 8, 0.1);
+//         for (int j = 0; j < height; j++)
+//         {
+//             img_vfilted[j][i] = static_cast<int>(filtered[j]);
+//         }
+//     }
+
+//     return 0;
+// }
+
+
+// *************************************低通滤波结束*********************************
+
+
+
+
+// // Function to compute horizontal edges using Sobel operator
+// std::vector<std::vector<bool>> sobel_h(const std::vector<std::vector<float>>& img) {
+//     int height = img.size();
+//     int width = img[0].size();
+//     std::vector<std::vector<bool>> edges_h(height, std::vector<bool>(width, false));
+
+//     // Sobel operator implementation
+//     // ...
+
+//     return edges_h;
+// }
+
+// // Function to compute vertical edges using Sobel operator
+// std::vector<std::vector<bool>> sobel_v(const std::vector<std::vector<float>>& img) {
+//     int height = img.size();
+//     int width = img[0].size();
+//     std::vector<std::vector<bool>> edges_v(height, std::vector<bool>(width, false));
+
+//     // Sobel operator implementation
+//     // ...
+
+//     return edges_v;
+// }
+
+// // Function to apply Marziliano method for horizontal edges
+// std::vector<std::vector<float>> marziliano_method_h(const std::vector<std::vector<bool>>& edges_h, const std::vector<std::vector<int>>& Block_filted_temp) {
+//     int height = edges_h.size();
+//     int width = edges_h[0].size();
+//     std::vector<std::vector<float>> edgewidth_h_temp(height, std::vector<float>(width, 0.0));
+
+//     // Marziliano method implementation
+//     // ...
+
+//     return edgewidth_h_temp;
+// }
+
+// // Function to apply Marziliano method for vertical edges
+// std::vector<std::vector<float>> marziliano_method_v(const std::vector<std::vector<bool>>& edges_v, const std::vector<std::vector<int>>& Block_filted_temp) {
+//     int height = edges_v.size();
+//     int width = edges_v[0].size();
+//     std::vector<std::vector<float>> edgewidth_v_temp(height, std::vector<float>(width, 0.0));
+
+//     // Marziliano method implementation
+//     // ...
+
+//     return edgewidth_v_temp;
+// }
+
+// // Function to select blocks using Farthest Point Sampling (FPS)
+// std::pair<std::vector<int>, std::vector<std::vector<int>>> FPS(const std::vector<std::vector<int>>& coordinate_list, int blocknum) {
+//     int num_blocks = coordinate_list.size();
+//     std::vector<int> index(num_blocks);
+//     std::iota(index.begin(), index.end(), 0);
+
+//     // Farthest Point Sampling implementation
+//     // ...
+
+//     std::vector<std::vector<int>> selected_block(blocknum, std::vector<int>(2, 0));
+
+//     return std::make_pair(index, selected_block);
+// }
+
+std::tuple<int, int, float> compute_motion_blur(const std::string& img_name, const std::string& image_path, int rotation_angle) {
+    // Load image and convert to grayscale
+    // ...
+
+    if (rotation_angle != 0) {
+        // Rotate image
+        // ...
+
+        // Create a black image with the same size as the original image
+        // ...
+
+        int width = image1.size().width;
+        int height = image1.size().height;
+
+        // Set pixels outside the central region to white
+        // ...
+
+        // Rotate the black image
+        // ...
+
+        // Convert the rotated black image to grayscale
+        // ...
+
+        // Convert the rotated black image to a numpy array of float32 type
+        // ...
+
+        // Rotate the original grayscale image
+        // ...
+    }
+
+    // Convert the grayscale image to a numpy array of float32 type
+    // ...
+
+    int height = img.size();
+    int width = img[0].size();
+    int b_w = 320;
+    int b_h = b_w;
+    int L = b_w * b_h;
+    std::vector<float> ratiolisth;
+    std::vector<float> ratiolistv;
+    float ignore_ratio = 0.1;
+
+    std::vector<int> indexlist_h;
+    std::vector<int> selected_index_h;
+    std::vector<std::vector<int>> coordinate_list_h;
+    std::vector<int> indexlist_v;
+    std::vector<int> selected_index_v;
+    std::vector<std::vector<int>> coordinate_list_v;
+    int block_num_h_ori = 20;
+    int block_num_v_ori = block_num_h_ori;
+    int blocknum_h = 9;
+    int blocknum_v = blocknum_h;
+
+    int blocknum_final = 5;
+
+    std::vector<std::vector<int>> bbox_list_h;
+    std::vector<std::vector<int>> bbox_list_v;
+    std::vector<std::vector<int>> bbox_list;
+    int bbox_num = 0;
+
+    int bbox_num1 = bbox_num;
+    int bbox_num2 = bbox_num;
+
+    int blockrow = std::floor(height / b_h);
+    int blockcol = std::floor(width / b_w);
+    std::vector<std::vector<bool>> sobel_h_edges = sobel_h(img);
+    std::vector<std::vector<bool>> sobel_v_edges = sobel_v(img);
+
+    std::vector<std::vector<int>> img_hfilted = img;
+    std::vector<std::vector<int>> img_vfilted = img;
+
+    std::vector<float> b(9);
+    std::vector<float> a(9);
+    // Butterworth filter coefficients
+     int height = 10; // Replace with actual height value
+    int width = 10; // Replace with actual width value
+
+    // Initialize img_hfilted and img_vfilted arrays
+    std::vector<std::vector<int>> img_hfilted(height, std::vector<int>(width));
+    std::vector<std::vector<int>> img_vfilted(height, std::vector<int>(width));
+
+    // Apply Butterworth filter to img_hfilted array
+    std::vector<double> b = butterworthFilter(img_hfilted[0], 8, 0.1);
+    for (int i = 0; i < height; i++)
+    {
+        std::vector<double> filtered = butterworthFilter(img_hfilted[i], 8, 0.1);
+        for (int j = 0; j < width; j++)
+        {
+            img_hfilted[i][j] = static_cast<int>(filtered[j]);
+        }
+    }
+
+    // Apply Butterworth filter to img_vfilted array
+    for (int i = 0; i < width; i++)
+    {
+        std::vector<double> filtered = butterworthFilter(img_vfilted[i], 8, 0.1);
+        for (int j = 0; j < height; j++)
+        {
+            img_vfilted[j][i] = static_cast<int>(filtered[j]);
+        }
+    }
+
+    // Clip the filtered images to the range [0, 255]
+    // ...
+
+    if (rotation_angle != 0) {
+        // Exclude pixels in the rotated black image and original image from the horizontal and vertical edges
+        // ...
+    }
+
+    std::vector<std::vector<float>> edgewidth_h(blockrow, std::vector<float>(blockcol, 0.0));
+    std::vector<std::vector<float>> edgewidth_v(blockrow, std::vector<float>(blockcol,
+
+
+
+int main() {
+    string path_name = "E:\\传统NR-IQA方法复现\\实拍图片\\711\\";
+    vector<string> path_list;
+
+    for (const auto& entry : fs::directory_iterator(path_name)) {
+        path_list.push_back(entry.path().string());
+    }
+
+    for (const auto& filename : path_list) {
+        string image = path_name + filename;
+        string img_name = fs::path(filename).stem().string();
+        string extension = fs::path(filename).extension().string();
+        vector<string> name_list;
+
+        // Split img_name by '-'
+        size_t pos = 0;
+        while ((pos = img_name.find('-')) != string::npos) {
+            name_list.push_back(img_name.substr(0, pos));
+            img_name.erase(0, pos + 1);
+        }
+        name_list.push_back(img_name);
+
+        if (name_list.size() == 2 && extension == ".jpg") {
+            cout << "******" << image << "******" << endl;
+            int edgewidth_h, edgewidth_v, blur_pixel;
+            edgewidth_h = edgewidth_v = blur_pixel = compute_motion_blur(img_name, image, 0);
+
+            cout << "x方向模糊像素数是：" << edgewidth_h << endl;
+            cout << "y方向模糊像素数是：" << edgewidth_v << endl;
+            cout << "模值模糊像素数是：" << blur_pixel << endl;
+        }
+    }
+
+    return 0;
+}
+
+
+
+int main() {
+    // Example usage
+    std::vector<std::vector<double>> image = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+    std::vector<std::vector<double>> result = sobel_h(image);
+
+    for (const auto& row : result) {
+        for (double value : row) {
+            std::cout << value << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    return 0;
+}
